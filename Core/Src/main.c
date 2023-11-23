@@ -18,12 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include <limits.h>
-#include <float.h>
-
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 
 /* USER CODE END Includes */
 
@@ -47,40 +45,23 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+UART_HandleTypeDef huart1;
+DMA_HandleTypeDef hdma_usart1_tx;
+DMA_HandleTypeDef hdma_usart1_rx;
+
 /* USER CODE BEGIN PV */
 
-int measure_count = 0;
 
-int interval_time = 0;
-int analog_value;
-int SAMPLE_SIZE = 10;
-int sample_index = 0;
-float moving_avg_sample[10] = { 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000 };
+uint32_t current_time = 0;
+uint32_t pre_time = 0;
+uint32_t receive_time = 0;
 
-float moving_avg_sample_sum;
-float moving_avg_result_value;
 
-int current_time = 0;
-int pre_time = 0;
-int measure_pre_time = 0;
+uint8_t *str = "CCCCCCCC\n";
+HAL_StatusTypeDef rcvStat;
+HAL_StatusTypeDef TransStat;
+uint8_t rx_data[10];
 
-float bit_voltage;
-float voltage;
-
-float avg_10;
-float avg_10_data[10];
-float avg_100;
-float avg_100_data[10];
-float avg_1000;
-float avg_1000_data[10];
-
-int array_10_index;
-int array_100_index;
-int array_1000_index;
-float full_sum_avg10;
-float full_sum_avg100;
-
-float* arr_address;
 
 /* USER CODE END PV */
 
@@ -88,8 +69,10 @@ float* arr_address;
 void SystemClock_Config(void);
 void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_MEMORYMAP_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -97,233 +80,14 @@ static void MX_MEMORYMAP_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-float Average_Calculate10() {
 
-  float min = FLT_MAX;
-  float max = FLT_MIN;
-  int min_index = 0;
-  int max_index = 0;
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
-  float sum = 0.0;
-
-  for(int i = 0; i < 10; i++) {
-    if(min > avg_10_data[i]) {
-      min = avg_10_data[i];
-      min_index = i;
-    }
-
-    if(max < avg_10_data[i]) {
-      max = avg_10_data[i];
-      max_index = i;
-    }
-
-  }
-  for(int j = 0; j < 10; j++) {
-    full_sum_avg10 = full_sum_avg10 + avg_10_data[j];
-    if(max_index == j || min_index == j){
-      continue;
-    } else {
-      sum = sum + avg_10_data[j];
-    }
-
-  }
-  return  sum / 8;
-}
-
-float Average_Calculate100() {
-
-  float min = FLT_MAX;
-  float max = FLT_MIN;
-  int min_index = 0;
-  int max_index = 0;
-
-  float sum = 0.0;
-
-  for(int i = 0; i < 10; i++) {
-    if(min > avg_100_data[i]) {
-      min = avg_100_data[i];
-      min_index = i;
-    }
-
-    if(max < avg_100_data[i]) {
-      max = avg_100_data[i];
-      max_index = i;
-    }
-
-  }
-  for(int i = 0; i < 10; i++) {
-    full_sum_avg100 = full_sum_avg100 + avg_100_data[i];
-    if(max_index == i || min_index == i){
-      continue;
-    } else {
-      sum = sum + avg_100_data[i];
-    }
-
-  }
-  return  sum / 8;
-}
-
-float Average_Calculate1000() {
-
-  float min = FLT_MAX;
-  float max = FLT_MIN;
-  int min_index = 0;
-  int max_index = 0;
-
-  float sum = 0.0;
-
-  for(int i = 0; i < 10; i++) {
-    if(min > avg_1000_data[i]) {
-      min = avg_1000_data[i];
-      min_index = i;
-    }
-
-    if(max < avg_1000_data[i]) {
-      max = avg_1000_data[i];
-      max_index = i;
-    }
-
-  }
-  for(int i = 0; i < 10; i++) {
-    if(max_index == i || min_index == i){
-      continue;
-    } else {
-      sum = sum + avg_1000_data[i];
-    }
-  }
-  return  sum / 8;
-}
-
-void Value_Allocate(float value) {
-  int array_length = sizeof(avg_10_data) / sizeof(float);
-  array_10_index = measure_count % array_length;
-
-  avg_10_data[array_10_index] = value;
-
-  if(measure_count > 0 && array_10_index == 9) {
-    array_100_index = measure_count / 10 % array_length;
-
-    avg_10 = Average_Calculate10();
-    avg_100_data[array_100_index] = full_sum_avg10 / 10;
-    full_sum_avg10 = 0.0;
-  }
-
-  if(measure_count > 10 && array_100_index == 9) {
-    array_1000_index = measure_count / 100 % array_length;
-
-    avg_100 = Average_Calculate100();
-    avg_1000_data[array_1000_index] = full_sum_avg100 / 10;
-    full_sum_avg100 = 0.0;
-  }
-
-  if(measure_count > 10 && array_1000_index == 9) {
-    avg_1000 = Average_Calculate1000();
-  }
+    printf("%s", rx_data);
+		HAL_UART_Transmit_DMA(&huart1, rx_data, 10);
 }
 
 
-
-/*
-void Average_10_Calculate(float value) {
-  int array_length = sizeof(avg_10_data) / sizeof(float);
-  array_10_index = measure_count % array_length;
-  avg_10_data[array_10_index] = value;
-
-  if(measure_count > 0 && measure_count % array_length == 9) {
-
-    float data_sum = 0.0;
-    for(int i = 0; i < array_length; i++) {
-      data_sum = data_sum + avg_10_data[i];
-      avg_10_data[i] = 0;
-    }
-
-
-
-    avg_10 = data_sum / array_length;
-  }
-}
-
-void Average_100_Calculate(float value) {
-  int array_length = sizeof(avg_100_data) / sizeof(float);
-  array_100_index = measure_count % array_length;
-  avg_100_data[array_100_index] = value;
-
-
-  if(measure_count > 10 && measure_count % array_length == 9) {
-    float data_sum = 0.0;
-    for(int i = 0; i < array_length; i++) {
-      data_sum = data_sum + avg_100_data[i];
-      avg_100_data[i] = 0;
-    }
-
-    avg_100 = data_sum / array_length;
-  }
-}
-
-void Average_1000_Calculate(float value) {
-  int array_length = sizeof(avg_1000_data) / sizeof(float);
-  array_1000_index = measure_count % array_length;
-  avg_1000_data[array_1000_index] = value;
-
-  if(measure_count > 10 && measure_count % array_length == 9) {
-    float data_sum = 0.0;
-    for(int i = 0; i < array_length; i++) {
-      data_sum = data_sum + avg_1000_data[i];
-      avg_1000_data[i] = 0;
-    }
-
-    avg_1000 = data_sum / array_length;
-  }
-}
-*/
-void Moving_Sample_Sum_Calculate() {
-  moving_avg_sample_sum = 0;
-
-  for(int i = 0; i < SAMPLE_SIZE; i++){
-    moving_avg_sample_sum += moving_avg_sample[i];
-    if(i < SAMPLE_SIZE -1 && moving_avg_sample[i + 1] == 5000) {
-      break;
-    }
-  }
-}
-
-void Handle_Moving_Sample_New_Data(float value) {
-
-  if(moving_avg_sample[SAMPLE_SIZE - 1] != 5000){
-
-    for(int i = 1; i < SAMPLE_SIZE; i++) {
-      moving_avg_sample[i - 1] = moving_avg_sample[i];
-    }
-  }
-  moving_avg_sample[sample_index] = value;
-}
-
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-
-    analog_value = HAL_ADC_GetValue(hadc);
-    bit_voltage = 3.3 / 4096;
-    voltage = bit_voltage * analog_value;
-    Handle_Moving_Sample_New_Data(voltage);
-    Moving_Sample_Sum_Calculate();
-    moving_avg_result_value = moving_avg_sample_sum / (sample_index + 1);
-
-
-    if(current_time - measure_pre_time > 999) {
-
-      // Average_10_Calculate(moving_avg_result_value);
-      // Average_100_Calculate(moving_avg_result_value);
-      // Average_1000_Calculate(moving_avg_result_value);
-      Value_Allocate(moving_avg_result_value);
-      measure_count++;
-      measure_pre_time = current_time;
-    }
-
-
-    if(sample_index < SAMPLE_SIZE - 1) {
-      sample_index++;
-    }
-
-}
 
 /* USER CODE END 0 */
 
@@ -358,11 +122,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_MEMORYMAP_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_ADC_Start_IT(&hadc1);
+
+  HAL_UART_Receive_DMA(&huart1, rx_data, 10);
 
   /* USER CODE END 2 */
 
@@ -370,17 +137,31 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    current_time = HAL_GetTick();
 
-    if(current_time - pre_time > 99) {
-      HAL_ADC_Start_IT(&hadc1);
-      interval_time = current_time - pre_time;
-      pre_time = current_time;
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    current_time = HAL_GetTick();
+
+    // rcvStat = HAL_UART_Receive(&huart1, &received, 1, 10);
+
+
+
+    //rcvStat = HAL_UART_Receive(&huart1, rx_data, 10, 10);
+    //receive_time = HAL_GetTick() - current_time;
+/*
+    for(int i = 0; i < 10; i++){
+        rx_data[i] = '\0';
+    }
+*/
+
+
+
+      HAL_Delay(500);
+
   }
+
   /* USER CODE END 3 */
 }
 
@@ -471,8 +252,6 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 0 */
 
-  ADC_ChannelConfTypeDef sConfig = {0};
-
   /* USER CODE BEGIN ADC1_Init 1 */
 
   /* USER CODE END ADC1_Init 1 */
@@ -495,19 +274,6 @@ static void MX_ADC1_Init(void)
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc1.Init.OversamplingMode = DISABLE;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_1;
-  sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -539,6 +305,74 @@ static void MX_MEMORYMAP_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV2;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMAMUX1_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -550,6 +384,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
