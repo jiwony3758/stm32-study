@@ -41,7 +41,6 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
@@ -50,25 +49,21 @@ DMA_HandleTypeDef hdma_usart1_tx;
 /* USER CODE BEGIN PV */
 
 const int MEASURE_CYCLE = 100;
+int led_state_change_count = 0;
 
-int measure_count = 0;
+GPIO_PinState pre_pin_state;
+GPIO_PinState temp_pin_state;
+GPIO_PinState current_pin_state;
 
-int interval_time = 0;
-int analog_value;
-
+int callback_start = 0;
+int callback_end = 0;
 
 int current_time = 0;
 int pre_time = 0;
-int measure_pre_time = 0;
-int rx_ready_check_time = 0;
 
-float bit_voltage;
-float voltage;
-
-int measure_signal = 0;
-
-char transmit_buffer[30];
-uint8_t receive_signal;
+const int DEBOUNCE_TIME = 30;
+int bounce_count = 0;
+int switch_detecting = 1;
 
 /* USER CODE END PV */
 
@@ -77,7 +72,6 @@ void SystemClock_Config(void);
 void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_MEMORYMAP_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
@@ -87,49 +81,16 @@ static void MX_USART1_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
-
-
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
-  printf("Error.\n");
-}
-
-void HAL_UART_AbortCpltCallback(UART_HandleTypeDef *huart) {
-  printf("Abort Complete.\n");
-}
-
-void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart) {
-  printf("Abort Receive Complete.\n");
-}
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-
-  printf("serial command : %d\n", receive_signal - '0');
-  if((int)(receive_signal - '0') == 1) {
-    measure_signal = 1;
-  } else if((int)(receive_signal - '0') == 0){
-    measure_signal = 0;
-  } else if((int)(receive_signal - '0') == 2) {
-    printf("Abort\n");
-
-    HAL_UART_Abort(huart);
+  bounce_count++;
+  current_pin_state = HAL_GPIO_ReadPin(INPUT1_GPIO_Port, INPUT1_Pin);
+  if(switch_detecting && current_pin_state != pre_pin_state) {
+    switch_detecting = 0;
+    pre_time = current_time;
   }
 
-}
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-
-    analog_value = HAL_ADC_GetValue(hadc);
-    bit_voltage = 3.3 / 4096;
-    voltage = bit_voltage * analog_value;
-    sprintf(transmit_buffer, "voltage : %f\n", voltage);
-
-    HAL_UART_Transmit_DMA(&huart1, transmit_buffer, 30);
-}
-
-
-HAL_DMA_StateTypeDef UART_Rx_State_Get(UART_HandleTypeDef *huart) {
-  return huart->hdmarx->State;
 }
 
 /* USER CODE END 0 */
@@ -166,14 +127,12 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_ADC1_Init();
   MX_MEMORYMAP_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  //HAL_GPIO_ReadPin(EXTI_PIN_GPIO_Port, EXTI_PIN_Pin);
 
-  HAL_UART_Receive_DMA(&huart1, &receive_signal, 1);
-  HAL_GPIO_WritePin(DIGITAL1_GPIO_Port, DIGITAL1_Pin, GPIO_PIN_SET);
-
+  HAL_GPIO_WritePin(OUTPUT_GPIO_Port, OUTPUT_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -182,21 +141,23 @@ int main(void)
   {
     current_time = HAL_GetTick();
 
-    if(measure_signal && current_time - pre_time > MEASURE_CYCLE - 1) {
-      HAL_ADC_Start_IT(&hadc1);
-      interval_time = current_time - pre_time;
-      pre_time = current_time;
-    }
 
-    if(current_time - rx_ready_check_time > 10000 && UART_Rx_State_Get(&huart1) == HAL_DMA_STATE_READY) {
-      HAL_UART_Receive_DMA(&huart1, &receive_signal, 1);
+    if(!switch_detecting && current_time - pre_time > DEBOUNCE_TIME) {
+      if(current_pin_state == GPIO_PIN_SET){
+        HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+      }else if(current_pin_state == GPIO_PIN_RESET){
+        HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+      }
+      pre_pin_state = current_pin_state;
+      led_state_change_count++;
+      switch_detecting = 1;
 
     }
-    rx_ready_check_time = current_time;
+  }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
   /* USER CODE END 3 */
 }
 
@@ -273,64 +234,6 @@ void PeriphCommonClock_Config(void)
   /* USER CODE BEGIN Smps */
 
   /* USER CODE END Smps */
-}
-
-/**
-  * @brief ADC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ADC1_Init(void)
-{
-
-  /* USER CODE BEGIN ADC1_Init 0 */
-
-  /* USER CODE END ADC1_Init 0 */
-
-  ADC_ChannelConfTypeDef sConfig = {0};
-
-  /* USER CODE BEGIN ADC1_Init 1 */
-
-  /* USER CODE END ADC1_Init 1 */
-
-  /** Common config
-  */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.OversamplingMode = DISABLE;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_8;
-  sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ADC1_Init 2 */
-
-  /* USER CODE END ADC1_Init 2 */
-
 }
 
 /**
@@ -435,17 +338,44 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(DIGITAL1_GPIO_Port, DIGITAL1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LED_GREEN_Pin|OUTPUT_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : DIGITAL1_Pin */
-  GPIO_InitStruct.Pin = DIGITAL1_Pin;
+  /*Configure GPIO pin : LED_GREEN_Pin */
+  GPIO_InitStruct.Pin = LED_GREEN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(DIGITAL1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(LED_GREEN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : INPUT1_Pin */
+  GPIO_InitStruct.Pin = INPUT1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(INPUT1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : B2_Pin */
+  GPIO_InitStruct.Pin = B2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(B2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : OUTPUT_Pin */
+  GPIO_InitStruct.Pin = OUTPUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(OUTPUT_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
